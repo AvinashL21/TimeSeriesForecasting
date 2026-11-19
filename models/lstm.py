@@ -83,27 +83,24 @@ def train_lstm(
         verbose=1
     )
 
-    # Recursive fixed-origin forecasting
+    # One-step-ahead walk-forward evaluation. For each test date, predict
+    # using the previous 60 observed values, then append the actual observation
+    # before predicting the next date. This is comparable to ARIMA/SARIMA.
     input_sequence = train_scaled[-lookback:].copy()
-
     predictions_scaled = []
 
-    for i in range(len(test_data)):
-
-        input_data = input_sequence.reshape(
-            1, lookback, 1
-        )
-
-        next_prediction = model.predict(
-            input_data, verbose=0
-        )[0, 0]
-
+    for actual_value in test_values:
+        input_data = input_sequence.reshape(1, lookback, 1)
+        next_prediction = float(model.predict(input_data, verbose=0)[0, 0])
         predictions_scaled.append(next_prediction)
 
-        input_sequence = np.append(
-            input_sequence[1:],
-            next_prediction
-        ).reshape(lookback, 1)
+        actual_scaled = scaler.transform(
+            np.asarray([[float(actual_value[0])]], dtype=float)
+        )[0, 0]
+        input_sequence = np.concatenate(
+            [input_sequence[1:], np.asarray([[actual_scaled]])],
+            axis=0
+        )
 
     # Convert predictions to original price scale
     predictions = scaler.inverse_transform(

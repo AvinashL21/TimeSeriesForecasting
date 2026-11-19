@@ -56,3 +56,10 @@ the dashboard presents them together and also provides a separate lag summary.
 ## Actual vs Predicted evaluation
 
 ARIMA and SARIMA test-period evaluation use one-step-ahead walk-forward forecasts. At each test timestamp, the model predicts the next observation and then incorporates that observation before predicting the following timestamp. This is a rolling evaluation protocol, not a fixed-origin multi-step forecast. The separate Future Forecast section remains a genuine multi-step forecast from the end of the available history.
+
+
+## Forecast evaluation and chart continuity
+- ARIMA, SARIMA, Prophet, and LSTM are evaluated using one-step-ahead walk-forward predictions.
+- At each test date, the model predicts using only earlier observations; the actual value is then added before the next prediction.
+- The future forecast chart applies a vertical continuity adjustment so each model's first future point starts from the last observed closing price. This preserves the forecast's step-to-step shape but shifts its absolute level; it is a visualization adjustment, not a guarantee of future prices.
+- Solid simulated paths are illustrative scenarios based on resampled historical daily-return variation. They are not model point forecasts.

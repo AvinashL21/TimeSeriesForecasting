@@ -17,7 +17,7 @@ from utils.preprocessing import prepare_time_series
 from utils.visualization import plot_time_series
 from models.arima import train_arima, fit_arima_model
 from models.sarima import train_sarima, fit_sarima_model
-from models.prophet_model import train_prophet
+from models.prophet_model import train_prophet, fit_prophet_model
 from models.lstm import train_lstm
 
 
@@ -604,7 +604,7 @@ try:
 
         st.subheader("Actual vs Predicted Values")
         st.caption(
-            "ARIMA and SARIMA use one-step-ahead walk-forward evaluation: each prediction uses observations available up to the previous test date. This lets the evaluation predictions respond to changing market values. The separate Future Forecast section remains a multi-step forecast."
+            "All four models use one-step-ahead walk-forward evaluation: each prediction uses observations available up to the previous test date. After each prediction, the actual observation is added before predicting the next date. The separate Future Forecast section remains a multi-step forecast."
         )
         pred_fig, pred_ax = plt.subplots(figsize=(12, 5))
         pred_ax.plot(test.index, test.values, label="Actual Prices", linewidth=2)
@@ -709,9 +709,9 @@ try:
                             ).ravel()
 
                         elif name == "Prophet":
-                            fitted = train_prophet(full_series, dummy_test)
+                            prophet_model = fit_prophet_model(full_series)
                             future_frame = pd.DataFrame({"ds": future_dates})
-                            values = fitted["model"].predict(
+                            values = prophet_model.predict(
                                 future_frame
                             )["yhat"].to_numpy()
 
@@ -739,6 +739,13 @@ try:
                         if not np.all(np.isfinite(values)):
                             raise ValueError("Forecast contains non-finite values.")
 
+                        # Continuity adjustment: preserve each model's forecast
+                        # shape/change while aligning its first point to the last
+                        # observed close. This is a display adjustment, not a
+                        # retraining step; explain it in the dashboard.
+                        last_close = float(full_series.iloc[-1])
+                        values = np.asarray(values, dtype=float)
+                        values = values + (last_close - float(values[0]))
                         future_values[name] = values
 
                     except Exception as exc:
@@ -791,14 +798,18 @@ try:
             for name in future_table.columns:
                 color = model_colors.get(name)
                 point_values = future_table[name].to_numpy(dtype=float)
+                bridge_dates = pd.DatetimeIndex([plot_history.index[-1]]).append(plot_dates)
+                bridge_values = np.concatenate(
+                    [[float(plot_history.iloc[-1])], point_values]
+                )
                 forecast_ax.plot(
-                    plot_dates,
-                    point_values,
+                    bridge_dates,
+                    bridge_values,
                     color=color,
                     linestyle=":",
-                    linewidth=1.5,
-                    alpha=0.65,
-                    label=f"{name} Expected Forecast"
+                    linewidth=1.8,
+                    alpha=0.8,
+                    label=f"{name} Continuity-adjusted Forecast"
                 )
                 try:
                     scenario_values = simulate_forecast_path(
@@ -806,9 +817,12 @@ try:
                         data["Close"].to_numpy(dtype=float),
                         seed=model_seeds.get(name, 42)
                     )
+                    scenario_bridge = np.concatenate(
+                        [[float(plot_history.iloc[-1])], scenario_values]
+                    )
                     forecast_ax.plot(
-                        plot_dates,
-                        scenario_values,
+                        bridge_dates,
+                        scenario_bridge,
                         color=color,
                         linestyle="-",
                         linewidth=2.2,
@@ -834,10 +848,14 @@ try:
             st.pyplot(forecast_fig)
             plt.close(forecast_fig)
             st.info(
-                "Solid coloured lines are simulated scenario paths with "
-                "resampled historical daily-return variation. Dotted lines are "
-                "the models' original expected forecasts. The downloadable CSV "
-                "contains the expected forecasts, not the simulated scenarios."
+                "All four models use one-step-ahead walk-forward evaluation in "
+                "the Actual vs Predicted chart. In this future chart, dotted "
+                "lines are continuity-adjusted expected forecasts: each forecast "
+                "is vertically aligned to the last observed closing price so "
+                "there is no artificial jump at the forecast boundary. Solid "
+                "lines are illustrative simulated paths with resampled historical "
+                "daily-return variation. The CSV contains the adjusted expected "
+                "forecasts, not the simulated scenarios."
             )
 
             st.download_button(
