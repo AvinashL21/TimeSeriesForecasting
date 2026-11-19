@@ -12,8 +12,8 @@ if PROJECT_DIR not in sys.path:
 from utils.data_loader import load_csv_data, load_yahoo_data
 from utils.preprocessing import prepare_time_series
 from utils.visualization import plot_time_series
-from models.arima import train_arima
-from models.sarima import train_sarima
+from models.arima import train_arima, fit_arima_model
+from models.sarima import train_sarima, fit_sarima_model
 from models.prophet_model import train_prophet
 from models.lstm import train_lstm
 
@@ -322,15 +322,12 @@ try:
             for name in selected_models:
                 try:
                     if name == "ARIMA":
-                        evaluation_results[name] = train_arima(
-                            train, test, order=(0, 1, 0)
-                        )
+                        # Select the best candidate using training-set AIC only.
+                        evaluation_results[name] = train_arima(train, test)
                     elif name == "SARIMA":
-                        evaluation_results[name] = train_sarima(
-                            train, test,
-                            order=(0, 1, 0),
-                            seasonal_order=(0, 0, 1, 21)
-                        )
+                        # Compare a compact set of seasonal/non-seasonal orders
+                        # using training-set AIC only (no test-data leakage).
+                        evaluation_results[name] = train_sarima(train, test)
                     elif name == "Prophet":
                         evaluation_results[name] = train_prophet(train, test)
                     elif name == "LSTM":
@@ -364,14 +361,51 @@ try:
 
         comparison = render_model_comparison(evaluation_results)
 
+        with st.expander("View selected ARIMA / SARIMA configurations"):
+            for model_name in ("ARIMA", "SARIMA"):
+                if model_name in evaluation_results:
+                    model_output = evaluation_results[model_name]
+                    if model_name == "ARIMA":
+                        st.write(
+                            f"**ARIMA order:** {model_output['order']} | "
+                            f"**Training AIC:** {model_output['aic']:.2f}"
+                        )
+                    else:
+                        st.write(
+                            f"**SARIMA order:** {model_output['order']} | "
+                            f"**Seasonal order:** {model_output['seasonal_order']} | "
+                            f"**Training AIC:** {model_output['aic']:.2f}"
+                        )
+            st.caption(
+                "Orders are selected using training data only. The seasonal period "
+                "of 21 represents an approximate trading month and should be treated "
+                "as an experimental assumption."
+            )
+
         st.subheader("Actual vs Predicted Values")
         pred_fig, pred_ax = plt.subplots(figsize=(12, 5))
         pred_ax.plot(test.index, test.values, label="Actual Prices", linewidth=2)
+        # Distinct styles and sparse markers keep near-overlapping ARIMA and
+        # SARIMA predictions identifiable without artificially shifting values.
+        prediction_styles = {
+            "ARIMA": {"color": "#ff7f0e", "linestyle": "--", "marker": "o"},
+            "SARIMA": {"color": "#2ca02c", "linestyle": ":", "marker": "s"},
+            "Prophet": {"color": "#d62728", "linestyle": "-", "marker": None},
+            "LSTM": {"color": "#9467bd", "linestyle": "-.", "marker": None},
+        }
+        marker_step = max(1, len(test) // 18)
         for name, output in evaluation_results.items():
+            style = prediction_styles.get(name, {})
             pred_ax.plot(
                 test.index,
                 np.asarray(output["predictions"]).ravel(),
-                label=f"{name} Predictions"
+                label=f"{name} Predictions",
+                linewidth=2,
+                alpha=0.95,
+                zorder=4 if name == "ARIMA" else 3,
+                markevery=marker_step if style.get("marker") else None,
+                markersize=4,
+                **style,
             )
         pred_ax.set_title("Actual vs Predicted Closing Prices")
         pred_ax.set_xlabel("Date")
@@ -420,20 +454,14 @@ try:
                 for name in current_models:
                     try:
                         if name == "ARIMA":
-                            fitted = train_arima(
-                                full_series, dummy_test, order=(0, 1, 0)
-                            )
+                            # Re-select on the full historical series, then forecast.
+                            fitted = fit_arima_model(full_series)
                             values = np.asarray(
                                 fitted["model"].forecast(steps=current_horizon)
                             ).ravel()
 
                         elif name == "SARIMA":
-                            fitted = train_sarima(
-                                full_series,
-                                dummy_test,
-                                order=(0, 1, 0),
-                                seasonal_order=(0, 0, 1, 21)
-                            )
+                            fitted = fit_sarima_model(full_series)
                             values = np.asarray(
                                 fitted["model"].get_forecast(
                                     steps=current_horizon
