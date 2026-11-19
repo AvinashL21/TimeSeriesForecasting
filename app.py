@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_DIR not in sys.path:
@@ -278,6 +281,182 @@ try:
     r1.metric("Average Daily Return", f"{daily_returns.mean():.3f}%")
     r2.metric("Highest Daily Return", f"{daily_returns.max():.3f}%")
     r3.metric("Lowest Daily Return", f"{daily_returns.min():.3f}%")
+
+    # --------------------------------------------------
+    # EXPLORATORY TIME SERIES ANALYSIS
+    # --------------------------------------------------
+    st.divider()
+    st.header("Exploratory Time Series Analysis")
+    st.write(
+        "Analyse stationarity, autocorrelation and seasonal structure before "
+        "training the forecasting models. ACF/PACF are calculated on the "
+        "first-differenced closing-price series to reduce the effect of trend."
+    )
+
+    analysis_tabs = st.tabs([
+        "Stationarity (ADF)",
+        "ACF & PACF",
+        "Autocorrelation",
+        "Decomposition"
+    ])
+
+    # Stationarity: test both the original price series and first differences.
+    with analysis_tabs[0]:
+        st.subheader("Augmented Dickey-Fuller (ADF) Test")
+        adf_series = close.dropna()
+        diff_series = adf_series.diff().dropna()
+
+        if len(adf_series) >= 20 and len(diff_series) >= 20:
+            try:
+                original_adf = adfuller(adf_series, autolag="AIC")
+                differenced_adf = adfuller(diff_series, autolag="AIC")
+
+                adf_col1, adf_col2 = st.columns(2)
+                with adf_col1:
+                    st.markdown("**Original closing-price series**")
+                    st.metric("ADF statistic", f"{original_adf[0]:.4f}")
+                    st.metric("p-value", f"{original_adf[1]:.6f}")
+                    st.caption(
+                        "Reject the unit-root null hypothesis at 5% when "
+                        "the p-value is below 0.05."
+                    )
+                with adf_col2:
+                    st.markdown("**First-differenced series**")
+                    st.metric("ADF statistic", f"{differenced_adf[0]:.4f}")
+                    st.metric("p-value", f"{differenced_adf[1]:.6f}")
+                    st.caption(
+                        "Differencing can help remove a changing level or trend."
+                    )
+
+                if original_adf[1] < 0.05:
+                    st.success("The original series is stationary according to the 5% ADF test.")
+                else:
+                    st.warning("The original series is non-stationary according to the 5% ADF test.")
+
+                if differenced_adf[1] < 0.05:
+                    st.success("The first-differenced series is stationary according to the 5% ADF test.")
+                else:
+                    st.warning("The first-differenced series remains non-stationary according to the 5% ADF test.")
+            except Exception as exc:
+                st.error(f"ADF test could not be calculated: {exc}")
+        else:
+            st.info("At least 20 observations are required for the ADF analysis.")
+
+    # ACF and PACF are complementary views of correlation across lags.
+    with analysis_tabs[1]:
+        st.subheader("ACF and PACF of First Differences")
+        correlation_series = close.diff().dropna()
+        max_lags = min(40, max(1, len(correlation_series) // 2 - 1))
+
+        if len(correlation_series) >= 20 and max_lags >= 2:
+            acf_col, pacf_col = st.columns(2)
+            with acf_col:
+                acf_fig, acf_ax = plt.subplots(figsize=(7, 4))
+                plot_acf(
+                    correlation_series,
+                    lags=max_lags,
+                    ax=acf_ax,
+                    zero=False
+                )
+                acf_ax.set_title("Autocorrelation Function (ACF)")
+                acf_ax.set_xlabel("Lag")
+                acf_ax.set_ylabel("Autocorrelation")
+                acf_fig.tight_layout()
+                st.pyplot(acf_fig, use_container_width=True)
+                plt.close(acf_fig)
+
+            with pacf_col:
+                pacf_fig, pacf_ax = plt.subplots(figsize=(7, 4))
+                plot_pacf(
+                    correlation_series,
+                    lags=max_lags,
+                    ax=pacf_ax,
+                    method="ywm",
+                    zero=False
+                )
+                pacf_ax.set_title("Partial Autocorrelation Function (PACF)")
+                pacf_ax.set_xlabel("Lag")
+                pacf_ax.set_ylabel("Partial autocorrelation")
+                pacf_fig.tight_layout()
+                st.pyplot(pacf_fig, use_container_width=True)
+                plt.close(pacf_fig)
+
+            st.caption(
+                "Bars extending beyond the shaded confidence bounds indicate "
+                "lags with statistically notable correlation at the approximate "
+                "95% level. ACF shows total lag correlation; PACF shows the "
+                "correlation remaining after accounting for shorter lags."
+            )
+        else:
+            st.info("At least 20 observations are required to display ACF and PACF.")
+
+    # A separate compact autocorrelation view: lag-1 coefficient and ACF curve.
+    with analysis_tabs[2]:
+        st.subheader("Autocorrelation Summary")
+        autocorr_series = close.diff().dropna()
+        if len(autocorr_series) >= 3:
+            lag_limit = min(20, len(autocorr_series) - 1)
+            lag1_corr = autocorr_series.autocorr(lag=1)
+            st.metric("Lag-1 autocorrelation of first differences", f"{lag1_corr:.4f}")
+
+            acf_summary_fig, acf_summary_ax = plt.subplots(figsize=(12, 4))
+            plot_acf(
+                autocorr_series,
+                lags=lag_limit,
+                ax=acf_summary_ax,
+                zero=True
+            )
+            acf_summary_ax.set_title("Autocorrelation by Lag")
+            acf_summary_ax.set_xlabel("Lag")
+            acf_summary_ax.set_ylabel("Autocorrelation")
+            acf_summary_fig.tight_layout()
+            st.pyplot(acf_summary_fig, use_container_width=True)
+            plt.close(acf_summary_fig)
+            st.caption(
+                "This is another view of the ACF: it summarises how the "
+                "first-differenced series relates to its past values."
+            )
+        else:
+            st.info("At least four observations are required for autocorrelation analysis.")
+
+    # Classical additive decomposition on observed closing prices.
+    with analysis_tabs[3]:
+        st.subheader("Time Series Decomposition")
+        decomposition_period = st.selectbox(
+            "Seasonal period (trading observations)",
+            options=[5, 21],
+            index=1,
+            help="5 approximates a trading week; 21 approximates a trading month."
+        )
+        if len(close) >= 2 * decomposition_period:
+            try:
+                decomposition = seasonal_decompose(
+                    close,
+                    model="additive",
+                    period=decomposition_period,
+                    extrapolate_trend="freq"
+                )
+                decomp_fig = decomposition.plot()
+                decomp_fig.set_size_inches(12, 8)
+                decomp_fig.suptitle(
+                    f"Additive Decomposition (period = {decomposition_period})",
+                    y=1.02
+                )
+                decomp_fig.tight_layout()
+                st.pyplot(decomp_fig, use_container_width=True)
+                plt.close(decomp_fig)
+                st.caption(
+                    "The decomposition separates the observed series into "
+                    "trend, seasonal and residual components. The chosen period "
+                    "is an analysis assumption, not proof that seasonality exists."
+                )
+            except Exception as exc:
+                st.error(f"Time-series decomposition failed: {exc}")
+        else:
+            st.info(
+                f"At least {2 * decomposition_period} observations are required "
+                f"for decomposition with period {decomposition_period}."
+            )
 
     # Sorting and download
     st.divider()
