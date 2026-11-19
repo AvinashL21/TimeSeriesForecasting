@@ -39,6 +39,44 @@ def future_business_dates(last_date, periods):
     )
 
 
+def simulate_forecast_path(point_forecast, historical_values, seed=42):
+    """Create one reproducible illustrative path around a model's point forecast.
+
+    Daily log-return innovations are resampled from the selected historical
+    series. The model's expected step-to-step movement is retained, while the
+    resampled innovations add realistic-looking day-to-day variation. This is
+    a simulated scenario, NOT the model's point forecast or a guaranteed price.
+    """
+    point = np.asarray(point_forecast, dtype=float).ravel()
+    history = np.asarray(historical_values, dtype=float).ravel()
+    if len(point) == 0:
+        raise ValueError("Cannot simulate a path for an empty forecast.")
+    if len(history) < 3 or np.any(history <= 0):
+        raise ValueError("At least three positive historical prices are needed.")
+
+    log_returns = np.diff(np.log(history))
+    # Remove the average drift: the fitted model already supplies the expected
+    # forecast direction, so only historical return innovations are resampled.
+    innovations = log_returns - np.mean(log_returns)
+    low, high = np.quantile(innovations, [0.01, 0.99])
+    innovations = np.clip(innovations, low, high)
+    if not np.isfinite(innovations).all() or np.std(innovations) == 0:
+        raise ValueError("Historical returns do not provide usable variation.")
+
+    rng = np.random.default_rng(seed)
+    sampled = rng.choice(innovations, size=len(point), replace=True)
+    scenario = np.empty(len(point), dtype=float)
+    scenario[0] = point[0]
+    for i in range(1, len(point)):
+        expected_change = point[i] - point[i - 1]
+        shock = np.expm1(sampled[i])
+        scenario[i] = scenario[i - 1] + expected_change + scenario[i - 1] * shock
+
+    if not np.isfinite(scenario).all():
+        raise ValueError("Simulated scenario contains non-finite values.")
+    return scenario
+
+
 def recursive_lstm_forecast(model, scaler, history, periods, lookback=60):
     """Recursively forecast future values using the trained LSTM."""
     values = np.asarray(history, dtype=float).reshape(-1, 1)
@@ -426,7 +464,10 @@ try:
         st.header("Future Forecast")
         st.caption(
             "Each model is refitted using all observations in the selected "
-            "date range. Forecast dates begin after the final historical date."
+            "date range. Forecast dates begin after the final historical date. "
+            "The chart can also show reproducible simulated paths based on "
+            "resampled historical daily returns; these are illustrative scenarios, "
+            "not additional model predictions or guaranteed prices."
         )
 
         current_horizon = st.session_state["forecast_horizon"]
@@ -555,15 +596,44 @@ try:
                 linewidth=2
             )
 
+            # Keep the statistical point forecasts visible, and add a
+            # reproducible bootstrapped scenario path to show plausible daily
+            # variation. Scenario paths are illustrative, not point estimates.
+            model_colors = {
+                "ARIMA": "#ff7f0e",
+                "SARIMA": "#2ca02c",
+                "Prophet": "#d62728",
+                "LSTM": "#9467bd",
+            }
+            model_seeds = {"ARIMA": 101, "SARIMA": 202, "Prophet": 303, "LSTM": 404}
             for name in future_table.columns:
+                color = model_colors.get(name)
+                point_values = future_table[name].to_numpy(dtype=float)
                 forecast_ax.plot(
                     plot_dates,
-                    future_table[name].values,
-                    marker="o",
-                    markersize=3,
-                    linestyle="--",
-                    label=f"{name} Forecast"
+                    point_values,
+                    color=color,
+                    linestyle=":",
+                    linewidth=1.5,
+                    alpha=0.65,
+                    label=f"{name} Expected Forecast"
                 )
+                try:
+                    scenario_values = simulate_forecast_path(
+                        point_values,
+                        data["Close"].to_numpy(dtype=float),
+                        seed=model_seeds.get(name, 42)
+                    )
+                    forecast_ax.plot(
+                        plot_dates,
+                        scenario_values,
+                        color=color,
+                        linestyle="-",
+                        linewidth=2.2,
+                        label=f"{name} Simulated Path"
+                    )
+                except Exception as scenario_error:
+                    st.warning(f"{name} scenario path could not be generated: {scenario_error}")
 
             last_date = data.index[-1]
             forecast_ax.axvline(
@@ -581,6 +651,12 @@ try:
             forecast_fig.tight_layout()
             st.pyplot(forecast_fig)
             plt.close(forecast_fig)
+            st.info(
+                "Solid coloured lines are simulated scenario paths with "
+                "resampled historical daily-return variation. Dotted lines are "
+                "the models' original expected forecasts. The downloadable CSV "
+                "contains the expected forecasts, not the simulated scenarios."
+            )
 
             st.download_button(
                 "Download Future Forecasts",
