@@ -101,7 +101,7 @@ def train_arima(train_data, test_data, order=None, trend=None):
         )
         predictions.append(next_prediction)
         rolling_result = rolling_result.append(
-            pd.Series([observed_value]), refit=False
+            np.asarray([observed_value], dtype=float), refit=False
         )
 
     predictions = np.asarray(predictions, dtype=float)
