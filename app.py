@@ -603,6 +603,9 @@ try:
             )
 
         st.subheader("Actual vs Predicted Values")
+        st.caption(
+            "ARIMA and SARIMA use one-step-ahead walk-forward evaluation: each prediction uses observations available up to the previous test date. This lets the evaluation predictions respond to changing market values. The separate Future Forecast section remains a multi-step forecast."
+        )
         pred_fig, pred_ax = plt.subplots(figsize=(12, 5))
         pred_ax.plot(test.index, test.values, label="Actual Prices", linewidth=2)
         # Distinct styles and sparse markers keep near-overlapping ARIMA and

@@ -86,15 +86,32 @@ def fit_sarima_model(train_data, order=None, seasonal_order=None):
 
 
 def train_sarima(train_data, test_data, order=None, seasonal_order=None):
-    """Select and fit SARIMA on training data, then make fixed-origin forecasts."""
+    """Evaluate SARIMA with expanding-history, one-step-ahead walk-forward forecasts.
+
+    At each test date, SARIMA predicts one step ahead and then appends the
+    observed value before predicting the next date. This makes the evaluation
+    line responsive to newly observed values without using future observations.
+    """
     fitted_info = fit_sarima_model(
         train_data, order=order, seasonal_order=seasonal_order
     )
-    predictions = np.asarray(
-        fitted_info["model"].get_forecast(steps=len(test_data)).predicted_mean,
-        dtype=float,
-    ).ravel()
+    rolling_result = fitted_info["model"]
     actual = np.asarray(test_data, dtype=float).ravel()
+    predictions = []
+
+    for observed_value in actual:
+        next_prediction = float(
+            np.asarray(
+                rolling_result.get_forecast(steps=1).predicted_mean,
+                dtype=float
+            ).ravel()[0]
+        )
+        predictions.append(next_prediction)
+        rolling_result = rolling_result.append(
+            pd.Series([observed_value]), refit=False
+        )
+
+    predictions = np.asarray(predictions, dtype=float)
 
     if len(predictions) != len(actual) or not np.isfinite(predictions).all():
         raise ValueError("SARIMA produced invalid or incorrectly sized predictions.")
@@ -102,7 +119,9 @@ def train_sarima(train_data, test_data, order=None, seasonal_order=None):
     denominator = np.maximum(np.abs(actual), 1e-8)
     return {
         **fitted_info,
+        "model": rolling_result,
         "predictions": predictions,
+        "evaluation_method": "one-step-ahead walk-forward",
         "rmse": float(np.sqrt(mean_squared_error(actual, predictions))),
         "mae": float(mean_absolute_error(actual, predictions)),
         "mape": float(np.mean(np.abs((actual - predictions) / denominator)) * 100),

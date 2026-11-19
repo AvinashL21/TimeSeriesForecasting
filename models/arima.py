@@ -84,12 +84,27 @@ def fit_arima_model(train_data, order=None, trend=None):
 
 
 def train_arima(train_data, test_data, order=None, trend=None):
-    """Select and fit ARIMA on training data, then make fixed-origin test forecasts."""
+    """Evaluate ARIMA with expanding-history, one-step-ahead walk-forward forecasts.
+
+    At each test date, the model predicts one step ahead, then the newly observed
+    actual value is appended before predicting the next date. This is a valid
+    rolling evaluation protocol and produces a time-varying prediction line.
+    """
     fitted_info = fit_arima_model(train_data, order=order, trend=trend)
-    predictions = np.asarray(
-        fitted_info["model"].forecast(steps=len(test_data)), dtype=float
-    ).ravel()
+    rolling_result = fitted_info["model"]
     actual = np.asarray(test_data, dtype=float).ravel()
+    predictions = []
+
+    for observed_value in actual:
+        next_prediction = float(
+            np.asarray(rolling_result.forecast(steps=1), dtype=float).ravel()[0]
+        )
+        predictions.append(next_prediction)
+        rolling_result = rolling_result.append(
+            pd.Series([observed_value]), refit=False
+        )
+
+    predictions = np.asarray(predictions, dtype=float)
 
     if len(predictions) != len(actual) or not np.isfinite(predictions).all():
         raise ValueError("ARIMA produced invalid or incorrectly sized predictions.")
@@ -97,7 +112,9 @@ def train_arima(train_data, test_data, order=None, trend=None):
     denominator = np.maximum(np.abs(actual), 1e-8)
     return {
         **fitted_info,
+        "model": rolling_result,
         "predictions": predictions,
+        "evaluation_method": "one-step-ahead walk-forward",
         "rmse": float(np.sqrt(mean_squared_error(actual, predictions))),
         "mae": float(mean_absolute_error(actual, predictions)),
         "mape": float(np.mean(np.abs((actual - predictions) / denominator)) * 100),

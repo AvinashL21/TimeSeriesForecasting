@@ -51,3 +51,8 @@ The 5- and 21-observation periods are approximate trading-week and trading-month
 choices. They are analysis settings, not evidence that the data necessarily has
 weekly or monthly seasonality. ACF and PACF are both autocorrelation diagnostics;
 the dashboard presents them together and also provides a separate lag summary.
+
+
+## Actual vs Predicted evaluation
+
+ARIMA and SARIMA test-period evaluation use one-step-ahead walk-forward forecasts. At each test timestamp, the model predicts the next observation and then incorporates that observation before predicting the following timestamp. This is a rolling evaluation protocol, not a fixed-origin multi-step forecast. The separate Future Forecast section remains a genuine multi-step forecast from the end of the available history.
