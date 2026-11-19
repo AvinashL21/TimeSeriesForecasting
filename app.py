@@ -457,14 +457,28 @@ try:
                 for name in current_models:
                     try:
                         if name == "ARIMA":
-                            # Re-select on the full historical series, then forecast.
-                            fitted = fit_arima_model(full_series)
+                            # Refit on all observations using the configuration
+                            # selected during chronological training-only evaluation.
+                            # This keeps evaluation and future forecasting consistent.
+                            selected = st.session_state["evaluation_results"]["ARIMA"]
+                            fitted = fit_arima_model(
+                                full_series,
+                                order=selected["order"],
+                                trend=selected.get("trend", "n"),
+                            )
                             values = np.asarray(
                                 fitted["model"].forecast(steps=current_horizon)
                             ).ravel()
 
                         elif name == "SARIMA":
-                            fitted = fit_sarima_model(full_series)
+                            # Preserve the training-selected seasonal specification
+                            # when refitting on the complete historical series.
+                            selected = st.session_state["evaluation_results"]["SARIMA"]
+                            fitted = fit_sarima_model(
+                                full_series,
+                                order=selected["order"],
+                                seasonal_order=selected["seasonal_order"],
+                            )
                             values = np.asarray(
                                 fitted["model"].get_forecast(
                                     steps=current_horizon
