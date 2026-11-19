@@ -1,4 +1,9 @@
-"""ARIMA model selection, fitting, evaluation and forecasting utilities."""
+"""ARIMA model selection, fitting, evaluation and forecasting utilities.
+
+Candidate models are ranked by AIC using training observations only. The
+selection includes both stationary and first-differenced specifications, and
+allows a deterministic trend where supported by the integration order.
+"""
 
 import warnings
 import numpy as np
@@ -6,13 +11,21 @@ import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-# A compact candidate set keeps model selection practical for an interactive app.
+
+# (order, trend). For d=0, a constant may be considered; for d=1,
+# a linear trend represents drift in the differenced process.
 ARIMA_CANDIDATES = [
-    (0, 1, 1),
-    (1, 1, 0),
-    (1, 1, 1),
-    (2, 1, 0),
-    (0, 1, 2),
+    ((0, 0, 1), "c"),
+    ((1, 0, 0), "c"),
+    ((1, 0, 1), "c"),
+    ((2, 0, 1), "c"),
+    ((0, 1, 1), "n"),
+    ((1, 1, 0), "n"),
+    ((1, 1, 1), "n"),
+    ((2, 1, 0), "n"),
+    ((0, 1, 1), "t"),
+    ((1, 1, 0), "t"),
+    ((1, 1, 1), "t"),
 ]
 
 
@@ -25,55 +38,67 @@ def _as_series(values):
     return series
 
 
-def fit_arima_model(train_data, order=None):
-    """Fit ARIMA; when order is None, select a candidate using training AIC."""
+def fit_arima_model(train_data, order=None, trend=None):
+    """Fit ARIMA; select order/trend by training AIC when not explicitly supplied."""
     train_series = _as_series(train_data)
-    candidates = [order] if order is not None else ARIMA_CANDIDATES
-    best_result, best_aic, best_order = None, np.inf, None
+
+    if order is not None:
+        if trend is None:
+            trend = "n" if order[1] > 0 else "c"
+        candidates = [(order, trend)]
+    else:
+        candidates = ARIMA_CANDIDATES
+
+    best_result, best_aic, best_order, best_trend = None, np.inf, None, None
     failures = []
 
-    for candidate in candidates:
+    for candidate_order, candidate_trend in candidates:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 fitted = ARIMA(
                     train_series,
-                    order=candidate,
-                    trend="n",
+                    order=candidate_order,
+                    trend=candidate_trend,
                     enforce_stationarity=False,
                     enforce_invertibility=False,
                 ).fit()
             if np.isfinite(fitted.aic) and fitted.aic < best_aic:
-                best_result, best_aic, best_order = fitted, fitted.aic, candidate
-        except Exception as exc:  # continue trying the remaining candidates
-            failures.append(f"{candidate}: {exc}")
+                best_result = fitted
+                best_aic = fitted.aic
+                best_order = candidate_order
+                best_trend = candidate_trend
+        except Exception as exc:
+            failures.append(f"{candidate_order}, trend={candidate_trend}: {exc}")
 
     if best_result is None:
-        detail = "; ".join(failures[:2])
+        detail = "; ".join(failures[:3])
         raise RuntimeError(f"Unable to fit any ARIMA candidate. {detail}")
 
     return {
         "model": best_result,
         "order": best_order,
+        "trend": best_trend,
         "aic": float(best_aic),
-        "trend": "n",
     }
 
 
-def train_arima(train_data, test_data, order=None):
+def train_arima(train_data, test_data, order=None, trend=None):
     """Select and fit ARIMA on training data, then make fixed-origin test forecasts."""
-    fitted_info = fit_arima_model(train_data, order=order)
+    fitted_info = fit_arima_model(train_data, order=order, trend=trend)
     predictions = np.asarray(
         fitted_info["model"].forecast(steps=len(test_data)), dtype=float
     ).ravel()
     actual = np.asarray(test_data, dtype=float).ravel()
+
     if len(predictions) != len(actual) or not np.isfinite(predictions).all():
         raise ValueError("ARIMA produced invalid or incorrectly sized predictions.")
 
+    denominator = np.maximum(np.abs(actual), 1e-8)
     return {
         **fitted_info,
         "predictions": predictions,
         "rmse": float(np.sqrt(mean_squared_error(actual, predictions))),
         "mae": float(mean_absolute_error(actual, predictions)),
-        "mape": float(np.mean(np.abs((actual - predictions) / np.maximum(np.abs(actual), 1e-8))) * 100),
+        "mape": float(np.mean(np.abs((actual - predictions) / denominator)) * 100),
     }

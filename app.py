@@ -368,6 +368,7 @@ try:
                     if model_name == "ARIMA":
                         st.write(
                             f"**ARIMA order:** {model_output['order']} | "
+                            f"**Trend:** {model_output.get('trend', 'n')} | "
                             f"**Training AIC:** {model_output['aic']:.2f}"
                         )
                     else:
@@ -377,9 +378,11 @@ try:
                             f"**Training AIC:** {model_output['aic']:.2f}"
                         )
             st.caption(
-                "Orders are selected using training data only. The seasonal period "
-                "of 21 represents an approximate trading month and should be treated "
-                "as an experimental assumption."
+                "Orders are selected using training data only. ARIMA compares "
+                "several non-seasonal orders and trend specifications. SARIMA tests "
+                "5-observation (approximate trading week) and 21-observation "
+                "(approximate trading month) seasonal cycles. These are hypotheses, "
+                "not guaranteed patterns in every dataset."
             )
 
         st.subheader("Actual vs Predicted Values")

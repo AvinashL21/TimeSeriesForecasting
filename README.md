@@ -11,9 +11,9 @@ An interactive Streamlit application for exploring historical time-series data, 
 - Download filtered data and future forecast results as CSV files.
 
 ## ARIMA and SARIMA model selection
-ARIMA and SARIMA use compact candidate-order searches. Candidate models are fitted on the training portion only, and the configuration with the lowest training AIC is selected before evaluating on the held-out test period. Future forecasts repeat model selection using the complete selected historical series.
+ARIMA and SARIMA use compact candidate-order searches. Candidate models are fitted on the training portion only, and the configuration with the lowest training AIC is selected before evaluating on the held-out test period. ARIMA compares several non-seasonal orders and compatible deterministic trend specifications. SARIMA compares seasonal candidates with periods of 5 observations (approximately one trading week) and 21 observations (approximately one trading month). Future forecasts repeat model selection using the complete selected historical series.
 
-The SARIMA search uses a seasonal period of 21 observations as an approximate trading-month assumption. This is an experimental modelling choice, not proof that the data has a true 21-day seasonal pattern. Financial market series can behave approximately like random walks, so ARIMA/SARIMA multi-step forecasts may still be relatively flat. A flat forecast should not be artificially altered for visual effect.
+The seasonal periods are experimental modelling hypotheses, not proof that the data has a true weekly or monthly seasonal pattern. Financial market series can behave approximately like random walks, so ARIMA/SARIMA multi-step forecasts may still be relatively flat. Similar predictions are possible when the data does not contain a strong seasonal signal. A forecast should never be artificially altered merely to make model lines look different.
 
 ## CSV format
 Uploaded CSV files must contain `Date` and `Close` columns. Dates should be parseable and closing prices numeric.
